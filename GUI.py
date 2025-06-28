@@ -8,7 +8,7 @@ from os import listdir
 from sys import exit
 from threading import Thread
 from time import time
-from tkinter import Event, IntVar, Menu, filedialog, messagebox, ttk
+from tkinter import Event, IntVar, Menu, filedialog, messagebox, ttk, StringVar
 from winsound import SND_ASYNC, PlaySound
 
 import LAN
@@ -27,8 +27,7 @@ from tools import print_chess
 class Global:
     """ 全局变量 """
     mode = None     # 当前游戏模式
-    timer = 0       # 计时判断时间戳
-    count = 0       # 未吃棋回合计数（和棋判定需要）
+    count = 0       # 未吃棋回��计数（和棋判定需要）
     index = -1      # 当前缓存索引
     first = None    # 当前先手方
     player = None   # 当前操作方
@@ -36,6 +35,7 @@ class Global:
     cache = []      # 走棋缓存列表
     chesses = [     # 棋盘列表
         [None]*9 for _ in range(10)]  # type: list[list[Chess | None]]
+    protect_king_when_check = config.get('protect_king_when_check', True)  # 优先保护将设置
 
 
 class Window:
@@ -72,6 +72,7 @@ class Window:
         m1.add_separator()
         m1.add_command(label='撤销', accelerator='Ctrl+Z', command=rule.revoke)
         m1.add_command(label='恢复', accelerator='Ctrl+Y', command=rule.recovery)
+        m1.add_command(label='停一手', command=self.skip_turn, accelerator='Ctrl+K', state='normal' if config.get('allow_skip', False) else 'disabled')
         m1.add_separator()
         m1.add_command(label='游戏设置', command=self.setting)
         m1.add_command(label='新游戏', accelerator='Ctrl+N', command=self.new)
@@ -93,11 +94,12 @@ class Window:
         self.root.bind('<Control-n>', lambda _: self.new())         # 新游戏
         self.root.bind('<Control-q>', lambda _: self.root.quit())   # 退出
         self.root.bind('<Control-t>', lambda _: self.test())        # AI测试
+        self.root.bind('<Control-k>', lambda _: self.skip_turn() if config.get('allow_skip', False) else None)   # 停一手
 
     def init_board(self) -> None:
         """ 棋盘 """
         def point(x: int, y: int) -> None:
-            """ 关键点 """
+            """ ��键点 """
             a, b = 5*S, 25*S  # 间距，长度
             if x != 40*S:
                 self.canvas.create_line(x-b, y-a, x-a, y-a, x-a, y-b)
@@ -146,12 +148,45 @@ class Window:
                 toplevel, 300*S, 150*S, expand=False)
             canvas_.place(x=0, y=0)
             last = tkt.CanvasButton(
-                canvas_, 6*S, 121*S, 80*S, 23*S, 6*S, font=('楷体', round(12*S)), text='上一步',
+                canvas_, 6*S, 121*S, 80*S, 23*S, 6*S, font=('楷体', round(12*S), ''), text='上一步',
                 command=lambda: (toplevel.title('选择模式'), canvas_.destroy()))
+            last.command_ex = getattr(last, 'command_ex', {})
             last.command_ex['press'] = lambda: PlaySound(
                 VOICE_BUTTON, SND_ASYNC)
             if mode in 'COMPUTER LOCAL':
                 more_set(toplevel, canvas_)
+                last.move(122*S, 0)
+                btn_start = tkt.CanvasButton(
+                    canvas_, 214*S, 121*S, 80*S, 23*S, 6*S, font=('楷体', round(12*S), ''), text='开始',
+                    command=lambda: (rule.modechange(mode, ''.join(
+                        [str(v.get()) for v in toplevel.var_list])), toplevel.destroy())
+                )
+                btn_start.command_ex = getattr(btn_start, 'command_ex', {})
+                btn_start.command_ex['press'] = lambda: PlaySound(VOICE_BUTTON, SND_ASYNC)
+                toplevel.title(
+                    '选择模式 - ' + ('双人对弈' if mode == 'LOCAL' else '人机对战'))
+            elif mode == 'LAN':
+                toplevel.title('选择模式 - 联机对抗')
+                info = canvas_.create_text(
+                    150*S, 85*S, font=('楷体', round(10*S)), justify='center', text='请选择连接方式')
+                btn_client = tkt.CanvasButton(
+                    canvas_, 20*S, 20*S, 120*S, 30*S, 8*S, '客户端连接', font=('楷体', round(12*S), ''),
+                    command=lambda: (LAN.API(toplevel, 'CLIENT'),
+                                     PlaySound(VOICE_BUTTON, SND_ASYNC))
+                )
+                btn_client.command_ex = getattr(btn_client, 'command_ex', {})
+                btn_client.command_ex['touch'] = lambda: canvas_.itemconfigure(
+                    info, text='主动的连接方式\n套接字将主动搜索局域网内可识别的服务端')
+                btn_server = tkt.CanvasButton(
+                    canvas_, 160*S, 20*S, 120*S, 30*S, 8*S, '服务端连接', font=('楷体', round(12*S), ''),
+                    command=lambda: (LAN.API(toplevel, 'SERVER'),
+                                     PlaySound(VOICE_BUTTON, SND_ASYNC))
+                )
+                btn_server.command_ex = getattr(btn_server, 'command_ex', {})
+                btn_server.command_ex['touch'] = lambda: canvas_.itemconfigure(
+                    info, text='被动的连接方式\n套接字将惰性地等待可能的客户端的连接')
+
+            else:
                 last.move(122*S, 0)
                 tkt.CanvasButton(
                     canvas_, 214*S, 121*S, 80*S, 23*S, 6*S, font=('楷体', round(12*S)), text='开始',
@@ -160,22 +195,6 @@ class Window:
                 ).command_ex['press'] = lambda: PlaySound(VOICE_BUTTON, SND_ASYNC)
                 toplevel.title(
                     '选择模式 - ' + ('双人对弈' if mode == 'LOCAL' else '人机对战'))
-            elif mode == 'LAN':
-                toplevel.title('选择模式 - 联机对抗')
-                info = canvas_.create_text(
-                    150*S, 85*S, font=('楷体', round(10*S)), justify='center', text='请选择连接方式')
-                tkt.CanvasButton(
-                    canvas_, 20*S, 20*S, 120*S, 30*S, 8*S, '客户端连接', font=('楷体', round(12*S)),
-                    command=lambda: (LAN.API(toplevel, 'CLIENT'),
-                                     PlaySound(VOICE_BUTTON, SND_ASYNC))
-                ).command_ex['touch'] = lambda: canvas_.itemconfigure(
-                    info, text='主动的连接方式\n套接字将主动搜索局域网内可识别的服务端')
-                tkt.CanvasButton(
-                    canvas_, 160*S, 20*S, 120*S, 30*S, 8*S, '服务端连接', font=('楷体', round(12*S)),
-                    command=lambda: (LAN.API(toplevel, 'SERVER'),
-                                     PlaySound(VOICE_BUTTON, SND_ASYNC))
-                ).command_ex['touch'] = lambda: canvas_.itemconfigure(
-                    info, text='被动的连接方式\n套接字将惰性地等待可能的客户端的连接')
 
         tkt.CanvasButton(
             canvas, 25*S, 15*S, 70*S, 70*S, 10*S, 'AI', font=('方正舒体', round(50*S), 'bold'),
@@ -192,6 +211,7 @@ class Window:
             command=lambda: (canvas_set('LAN'), PlaySound(
                 VOICE_BUTTON, SND_ASYNC))
         ).command_ex['touch'] = lambda: canvas.itemconfigure(text, text='和局域网里的朋友一起玩耍吧！')
+
         canvas.create_text(60*S, 100*S, text='人机对战', font=('楷体', round(12*S)))
         canvas.create_text(150*S, 100*S, text='双人对弈', font=('楷体', round(12*S)))
         canvas.create_text(240*S, 100*S, text='联机对抗', font=('楷体', round(12*S)))
@@ -200,8 +220,8 @@ class Window:
         text = canvas.create_text(
             150*S, 132*S, text='请选择游戏模式', font=('楷体', round(12*S)))
 
-    def help(self, _ind: list[int] = [0]) -> None:
-        """ 帮助页面 """
+    def help(self, _ind: list[int] = None) -> None:
+        """ 帮助页��� """
         def text_limit(string: str, length: int) -> str:
             """ 文本单行长度限制 """
             out: str = ' '*4
@@ -275,7 +295,10 @@ class Window:
                 auto_scale=eval(auto_scale.value),
                 level=int(level.get()),
                 peace=int(peace.get()),
-                algo=1 if ai.value == "极小极大搜索" else 2 if ai.value == "alpha-beta 剪枝" else 0)
+                algo=1 if ai.value == "极小极大搜索" else 2 if ai.value == "alpha-beta 剪枝" else 0,
+                protect_king_when_check=eval(protect_king.value),
+                ai_max_time=int(ai_max_time.get()),
+                allow_skip=eval(allow_skip.value))
             toplevel.destroy()
 
         def default() -> None:
@@ -289,16 +312,20 @@ class Window:
             info.configure(text='True')
             auto_scale.configure(text='True')
             ai.configure(text="alpha-beta 剪枝(C++实现)")
+            protect_king.configure(text='True')
+            ai_max_time.set('5')
+            ai_max_time.cursor_flash()
+            allow_skip.configure(text='False')
 
-        m = MiniWin(self.root, '游戏设置', 400, 300)
+        m = MiniWin(self.root, '游戏设置', 400, 320)
         toplevel, canvas = m.toplevel, m.canvas
         logo(canvas)
         canvas.create_rectangle(
-            -1, 265*S, 401*S, 301*S, width=0, fill='#F1F1F1')
+            -1, 285*S, 401*S, 321*S, width=0, fill='#F1F1F1')
         canvas.create_text(
             20*S, 20*S, text='窗口缩放系数（重启生效）', font=('楷体', round(12*S)), anchor='w')
         canvas.create_text(
-            20*S, 50*S, text='窗口自动缩放（重启生效）', font=('楷体', round(12*S)), anchor='w')
+            20*S, 50*S, text='窗口自动缩放（重启生效���', font=('楷体', round(12*S)), anchor='w')
         canvas.create_text(
             20*S, 80*S, text='棋子可走显示', font=('楷体', round(12*S)), anchor='w')
         canvas.create_text(
@@ -307,6 +334,12 @@ class Window:
             20*S, 140*S, text='AI搜索算法', font=('楷体', round(12*S)), anchor='w')
         canvas.create_text(
             20*S, 170*S, text='和棋判定回合数', font=('楷体', round(12*S)), anchor='w')
+        canvas.create_text(
+            20*S, 200*S, text='将军时优先保护将', font=('楷体', round(12*S)), anchor='w')
+        canvas.create_text(
+            20*S, 230*S, text='人机互弈AI最大搜索时间(秒)', font=('楷体', round(12*S)), anchor='w')
+        canvas.create_text(
+            20*S, 260*S, text='允许停一手', font=('楷体', round(12*S)), anchor='w')
 
         scale = tkt.CanvasEntry(
             canvas, 220*S, 10*S, 100*S, 20*S, 5*S, justify='center', font=('楷体', round(12*S)),
@@ -342,24 +375,36 @@ class Window:
                               font=('楷体', round(12*S)), color_fill=tkt.COLOR_NONE,
                               command=lambda: ai.configure(text=("极小极大搜索" if ai.value == "alpha-beta 剪枝(C++实现)" else "alpha-beta 剪枝" if ai.value == "极小极大搜索" else "alpha-beta 剪枝(C++实现)")))
         ai.command_ex['press'] = lambda: PlaySound(VOICE_BUTTON, SND_ASYNC)
+        protect_king = tkt.CanvasButton(
+            canvas, 180*S, 190*S, 120*S, 20*S, 5*S, str(config.get('protect_king_when_check', True)), font=('楷体', round(12*S)),
+            command=lambda: protect_king.configure(
+                text='True' if protect_king.value == 'False' else 'False'),
+            color_fill=tkt.COLOR_NONE)
+        protect_king.command_ex['press'] = lambda: PlaySound(VOICE_BUTTON, SND_ASYNC)
+        ai_max_time = tkt.CanvasEntry(
+            canvas, 220*S, 220*S, 100*S, 20*S, 5*S, justify='center', font=('楷体', round(12*S)),
+            color_fill=tkt.COLOR_NONE)
+        ai_max_time.set(str(config.get('ai_max_time', 5)))
+        ai_max_time.cursor_flash()
+        allow_skip = tkt.CanvasButton(
+            canvas, 220*S, 250*S, 80*S, 20*S, 5*S, str(config.get('allow_skip', False)), font=('楷体', round(12*S)),
+            command=lambda: allow_skip.configure(
+                text='True' if allow_skip.value == 'False' else 'False'),
+            color_fill=tkt.COLOR_NONE)
+        allow_skip.command_ex['press'] = lambda: PlaySound(VOICE_BUTTON, SND_ASYNC)
 
-        tkt.CanvasButton(canvas, 314*S, 271*S, 80*S, 23*S, 6*S, '保存', font=('楷体', round(12*S)), command=save
+        tkt.CanvasButton(canvas, 314*S, 291*S, 80*S, 23*S, 6*S, '保存', font=('楷体', round(12*S)), command=save
                          ).command_ex['press'] = lambda: PlaySound(VOICE_BUTTON, SND_ASYNC)
-        tkt.CanvasButton(canvas, 228*S, 271*S, 80*S, 23*S, 6*S, '恢复默认', font=('楷体', round(12*S)), command=default
+        tkt.CanvasButton(canvas, 228*S, 291*S, 80*S, 23*S, 6*S, '恢复默认', font=('楷体', round(12*S)), command=default
                          ).command_ex['press'] = lambda: PlaySound(VOICE_BUTTON, SND_ASYNC)
 
     def library(self) -> None:
         """ 棋局库 """
         def scroll(event: Event) -> None:
             """ 上下移动画布 """
-            if (event.delta < 0 and content.pos <= 10) or (event.delta > 0 and content.pos >= content.length):
-                return
-            key = 1 if event.delta > 0 else -1
-            content.pos += key
-            for widget in content.widget():
-                tkt.move(content, widget, 0, 35*key*S, 300, 'smooth', 30)
+            content.yview_scroll(int(-1*(event.delta/120)), 'units')
 
-        def canvas_set(path: str) -> None:
+        def canvas_set(path: str, file: str = None) -> None:
             """ 画布设定 """
             if path.endswith('.fen'):
                 toplevel.destroy()
@@ -372,7 +417,6 @@ class Window:
             path_ = path
             info.configure(text=path.replace('./data', '.'))
             path_list = listdir(path)
-            content.pos = content.length = len(path_list)
             for widget in content.widget():
                 widget.destroy()
             for i, file in enumerate(path_list):
@@ -382,6 +426,7 @@ class Window:
                     command=lambda path=path, file=file: canvas_set(
                         '%s/%s' % (path, file))
                 ).command_ex['press'] = lambda: PlaySound(VOICE_BUTTON, SND_ASYNC)
+            content.config(scrollregion=content.bbox('all'))
 
         w = MiniWin(self.root, '棋局库', 300, 393)
         toplevel, canvas = w.toplevel, w.canvas
@@ -391,10 +436,18 @@ class Window:
             canvas, 210*S, 5*S, 80*S, 20*S, 5*S, '←后退', font=('楷体', round(12*S)),
             command=lambda: canvas_set(path_.rsplit('/', 1)[0]))
         back.command_ex['press'] = lambda: PlaySound(VOICE_BUTTON, SND_ASYNC)
-        content = tkt.Canvas(toplevel, int(290*S), int(357*S))
-        content.configure(highlightthickness=1, highlightbackground='grey')
-        content.bind('<MouseWheel>', scroll)
-        content.place(x=5*S, y=30*S)
+        # 新增：加滑动条
+        frame = tkt.Canvas(toplevel, int(290*S), int(357*S))
+        frame.configure(highlightthickness=1, highlightbackground='grey')
+        frame.place(x=5*S, y=30*S)
+        from tkinter import Scrollbar
+        vbar = Scrollbar(frame, orient='vertical')
+        vbar.pack(side='right', fill='y')
+        content = tkt.Canvas(frame, int(270*S), int(357*S))
+        content.pack(side='left', fill='both', expand=True)
+        content.configure(yscrollcommand=vbar.set)
+        vbar.config(command=content.yview)
+        content.bind_all('<MouseWheel>', scroll)
         path_ = './data'
         canvas_set(path_)
 
@@ -413,8 +466,10 @@ class Window:
             Chess(b, i, 9, '#FF0000')
 
     @classmethod
-    def clock(cls, flag: list[int | None] = [0, None]) -> None:
+    def clock(cls, flag: list[int | None] = None) -> None:
         """ 计时 """
+        if flag is None:
+            flag = [0, None]
         if (flag[1] and flag[1] != Global.timer) or not Global.player:
             return statistic(Time=flag[0])
         if not flag[1]:
@@ -511,6 +566,14 @@ class Window:
         cls.root.after(4000, Thread(
             target=cls.AImove, args=(color, True), daemon=True).start)
 
+    def skip_turn(self):
+        """ 停一手功能 """
+        if not config.get('allow_skip', False):
+            self.tip('未开启停一手功能，请在设置中开启。')
+            return
+        import rule
+        rule.skip_turn()
+
 
 class MiniWin:
     """ 小窗口 """
@@ -524,14 +587,37 @@ class MiniWin:
         self.toplevel.transient(root)
         self.canvas = tkt.Canvas(self.toplevel, width*S, height*S)
         self.canvas.place(x=0, y=0)
+        self.toplevel.var_list = []  # 初始化 var_list 属性
+
+
+class CanvasButton(tkt.CanvasButton):
+    def __init__(self, *args, font=None, **kwargs):
+        if font and isinstance(font, tuple) and len(font) == 2:
+            font = (font[0], font[1], '')  # 补全 font 参数为三元组
+        super().__init__(*args, font=font, **kwargs)
+        self.command_ex = {}
+
+
+class CanvasEntry(tkt.CanvasEntry):
+    def __init__(self, *args, text=None, **kwargs):
+        if isinstance(text, StringVar):
+            self.text_var = text
+            text = text.get()
+        else:
+            self.text_var = None
+        super().__init__(*args, text=text, **kwargs)
+
+    def update_text(self):
+        if self.text_var:
+            self.text_var.set(self.get())
 
 
 class Chess:
     """ 棋子 """
 
-    def __init__(self, name: str, x: int, y: int, color: bool) -> None:
+    def __init__(self, name: str, x: int, y: int, color: str) -> None:
         """ 初始化 """
-        self.name = name  # 名称，区分类别
+        self.name = name  # 名���，区分类别
         self.color = color  # 颜色，区分红黑
         self.x, self.y = x, y
         Global.chesses[y][x] = self
@@ -569,7 +655,7 @@ class Chess:
             Global.chesses[self.y-y][self.x-x] = None
             Global.index += 1
             if Global.index == len(Global.cache):  # 新增
-                Global.cache.append(  # (目标者名称，目标位置，回退位移)
+                Global.cache.append(  # (目标者名称，目标位置，���退位移)
                     (getattr(Global.chesses[self.y][self.x], 'name', None), (self.x, self.y), (-x, -y)))
             else:  # 覆盖
                 Global.cache[Global.index] = (
@@ -580,7 +666,12 @@ class Chess:
             if flag:
                 statistic(Eat=1)
                 Global.count = 0
-                Global.chesses[self.y][self.x].destroy()
+                target = Global.chesses[self.y][self.x]
+                if target and target.name in '将帥':
+                    target.destroy(with_animation=True)
+                else:
+                    if target:
+                        target.destroy()
             else:
                 Global.count += 1
             Global.chesses[self.y][self.x] = self
@@ -588,25 +679,48 @@ class Chess:
                 rule.gameover()
                 if Global.mode == 'LAN':
                     LAN.API.close()
-            elif not (color := rule.warn(Global.chesses, self.color)):
-                file = VOICE_EAT if flag else VOICE_DROP
-                PlaySound(file, SND_ASYNC)
             else:
-                PlaySound(VOICE_WARN, SND_ASYNC)
-                statistic(Warn=1)
-                if rule.dead(Global.chesses, color[0]):  # 绝杀
-                    rule.gameover(color[0])
+                # 死将或将被吃都判负
+                dead_color = rule.dead(Global.chesses, self.color)
+                if dead_color and dead_color != self.color:
+                    rule.gameover(dead_color)
                     if Global.mode == 'LAN':
                         LAN.API.close()
-
+                    print_chess(Global.chesses)
+                    return
+                color = rule.warn(Global.chesses, self.color)
+                if not color:
+                    file = VOICE_EAT if flag else VOICE_DROP
+                    PlaySound(file, SND_ASYNC)
+                else:
+                    PlaySound(VOICE_WARN, SND_ASYNC)
+                    statistic(Warn=1)
             print_chess(Global.chesses)
 
         for item in self.items:
             tkt.move(Window.canvas, item, x*70*S, y*70*S, 500, 'smooth',
                      end=update if not self.items.index(item) else None)
 
-    def destroy(self) -> None:
-        """ 摧毁棋子 """
+    def play_dead_animation(self, callback=None, flash_times=6, interval=100):
+        """将/帅被吃时的闪烁动画"""
+        def flash(count):
+            if count >= flash_times:
+                if callback:
+                    callback()
+                return
+            # 交替变色
+            color = '#FF0000' if count % 2 == 0 else '#FFFFFF'
+            Window.canvas.itemconfigure(self.items[2], fill=color)
+            Window.canvas.itemconfigure(self.items[3], fill=color)
+            Window.root.after(interval, lambda: flash(count + 1))
+        flash(0)
+
+    def destroy(self, with_animation=False):
+        """摧毁棋子，支持动画"""
+        if with_animation and self.name in '将帥':
+            # 动画结��后再删除
+            self.play_dead_animation(lambda: self.destroy(with_animation=False))
+            return
         Window.canvas.delete(*self.items)
         self.virtual_delete()
 
@@ -729,7 +843,7 @@ def open_file(path: str | None = None) -> None:
             Global.first = first != 'b'
             rule.modechange('END')
         except:
-            Window.tip('— 提示 —\n象棋文件格式不正确！\n导入棋局失败！')
+            Window.tip('— 提示 —\n象��文件格式不正确！\n导入棋局失败！')
 
 
 def save_file(code: str = '') -> None:
@@ -751,10 +865,29 @@ def save_file(code: str = '') -> None:
 
 
 def LANmove() -> None:
-    """ 局域网移动 """
+    """ 局域网移动及消息处理 """
+    import rule
+    import LAN
+    from tkinter import messagebox
     while True:
-        x, y, flag, x_, y_ = LAN.API.recv()['msg']
-        if (x, y) == (x_, y_):
-            return
-        Global.chesses[9-y][8-x].move(flag, -x_, -y_)
-        rule.switch()
+        data = LAN.API.recv()
+        if not data:
+            continue
+        if data.get('type') == 'revoke_request':
+            # 对方请求悔棋
+            agree = messagebox.askyesno('悔棋请求', '对方请求悔棋，是否同意？')
+            LAN.API.send(type='revoke_reply', agree=agree)
+            if agree:
+                rule.revoke(True)
+        elif data.get('type') == 'recovery_request':
+            # 对方请求恢复
+            agree = messagebox.askyesno('恢复请求', '对方请求恢复，是否同意？')
+            LAN.API.send(type='recovery_reply', agree=agree)
+            if agree:
+                rule.recovery(True)
+        elif 'msg' in data:
+            x, y, flag, x_, y_ = data['msg']
+            if (x, y) == (x_, y_):
+                return
+            Global.chesses[9-y][8-x].move(flag, -x_, -y_)
+            rule.switch()

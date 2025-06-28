@@ -131,6 +131,11 @@ class Server(_Base):
         """ 身份确认 """
         self.send(msg='OK')
         code = self.recv()['msg']
+        # code 末尾加上当前优先保护将设置
+        import GUI
+        protect_flag = '1' if getattr(GUI.Global, 'protect_king_when_check', True) else '0'
+        if len(code) <= 13:
+            code += protect_flag
         modechange('LAN', code)
         self.toplevel.destroy()
         Thread(target=GUI.LANmove, daemon=True).start()
@@ -193,7 +198,7 @@ class Client(_Base):
         self.again.set_live(True)
 
     def connect(self) -> None:
-        """ 连接 """
+        """ ���接 """
         address = self.combobox.get()
         if not address:
             return messagebox.showwarning('中国象棋', '请选择可用的目标地址！')
@@ -210,12 +215,16 @@ class Client(_Base):
         """ 身份确认 """
         if self.recv()['msg'] == 'OK':
             code = [str(v.get()) for v in self.toplevel.var_list]
-            modechange('LAN', ''.join(code))
+            import GUI
+            protect_flag = '1' if getattr(GUI.Global, 'protect_king_when_check', True) else '0'
+            code_str = ''.join(code) + protect_flag
+            modechange('LAN', code_str)
             for i in 1, 5, 9:
                 code[i], code[i+3] = code[i+3], code[i]
                 code[i+1], code[i+2] = code[i+2], code[i+1]
             code[0] = '0' if code[0] == '1' else '1'
-            self.send(msg=''.join(code))
+            code_str2 = ''.join(code) + protect_flag
+            self.send(msg=code_str2)
             self.toplevel.destroy()
             Thread(target=GUI.LANmove, daemon=True).start()
 

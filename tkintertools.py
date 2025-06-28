@@ -74,7 +74,7 @@ COLOR_BAR = '#E1E1E1', '#06b025'                                    # 默认的�
 BORDERWIDTH = 1     # 默认控件外框宽度
 CURSOR = '│'        # 文本光标
 FONT = '楷体', 15   # 默认字体
-LIMIT = -1          # 默认文本长度
+LIMIT = -1          # 默认文本�����度
 RADIUS = 0          # 默认控件圆角半径
 FRAMES = 60         # 默认帧数
 
@@ -133,7 +133,7 @@ class Tk(tkinter.Tk):
         width, height = map(int, self.geometry().split('+')[0].split('x'))
         # NOTE: 此处必须用 geometry 方法，直接用 Event 或者 winfo 会有画面异常的 bug
 
-        if (width, height) == (self.width[1], self.height[1]):  # 没有大小的改变
+        if (width, height) == (self.width[1], self.height[1]):  # 没有���小的改变
             return
 
         for canvas in self._canvas:
@@ -208,7 +208,7 @@ class Toplevel(tkinter.Toplevel, Tk):
         `master`: 父窗口
         `title`: 窗口标题
         `width`: 窗口宽度（单位:像素）
-        `height`: 窗口高度
+        `height`: 窓口高度
         `x`: 窗口左上角横坐标（单位:像素）
         `y`: 窗口左上角纵坐标
         `shutdown`: 关闭窗口之前执行的函数（会覆盖关闭操作）
@@ -239,7 +239,7 @@ class Canvas(tkinter.Canvas):
         `expand`: 画布内控件是否能缩放
         `**kw`: 与 tkinter.Canvas 类的参数相同
         """
-        self.width = [width]*2  # [初始宽度, 当前宽度]
+        self.width = [width]*2  # [初始宽��, 当前宽度]
         self.height = [height]*2  # [初始高度, 当前高度]
         self._lock = lock
         self.expand = expand
@@ -253,6 +253,9 @@ class Canvas(tkinter.Canvas):
         tkinter.Canvas.__init__(
             self, master, width=width*S, height=height*S, highlightthickness=0, **kw)
 
+        # 确保 master 有 _canvas 属性
+        if not hasattr(master, '_canvas'):
+            master._canvas = []
         master._canvas.append(self)  # 将实例添加到 Tk 的画布列表中
 
         self.bind('<Motion>', self.__touch)  # 绑定鼠标触碰控件
@@ -459,7 +462,8 @@ class Canvas(tkinter.Canvas):
 
     def destroy(self: Self) -> None:
         # 重写：兼容
-        self.master._canvas.remove(self)
+        if hasattr(self.master, '_canvas'):
+            self.master._canvas.remove(self)
         for widget in self.widget():
             widget.destroy()
         return tkinter.Canvas.destroy(self)
@@ -624,7 +628,7 @@ class _BaseWidget:
             self.master.itemconfigure(self._text, fill=self.color_text[mode])
 
         if self.radius:
-            for item in self.inside:  # 修改色块
+            for item in self.inside:  # 修改��块
                 self.master.itemconfigure(item, fill=self.color_fill[mode])
 
             # 修改线条
@@ -959,7 +963,7 @@ class _TextWidget(_BaseWidget):
 
 
 class CanvasEntry(_TextWidget):
-    """ 创建一个虚拟的输入框控件，可输入单行少量字符，并获取这些字符 """
+    """ 创建一个虚拟的输入框控件，可输入单行少量��符，并获取这些字符 """
 
     def __init__(
         self: Self,
@@ -1362,7 +1366,7 @@ def move(
     `dx`: 横向移动的距离（单位：像素）
     `dy`: 纵向移动的距离（单位：像素）
     `times`: 移动总时长（单位：毫秒）
-    `mode`: 移动速度模式，为 smooth（顺滑）、rebound（回弹）和 flat（平移）这三种，或者为元组 (函数, 起始值, 终止值) 的形式
+    `mode`: 移动速��模式，为 smooth（顺滑）、rebound（回弹）和 flat（平移）这三种，或者为元组 ( 函数, 起始值, 终止值) 的形式
     `frames`: 帧数，越大移动就越流畅，但计算越慢（范围为 1~100）
     `end`: 移动结束时执行的函数
     """
@@ -1432,7 +1436,7 @@ def color(
     """
     ### 颜色函数
     按一定比例给出已有 RGB 颜色字符串的渐变 RGB 颜色字符串，或颜色的对比色\n
-    `color`: 颜色元组或列表 (初始颜色, 目标颜色)，或者一个颜色字符串（此时返回对比色）
+    `color`: 颜色元组或列表 (初始颜色, 目标颜色)，或者一个颜色字符串（此时返回对比色���
     `proportion`: 改变比例（浮点数，范围为 0~1）
     """
     rgb, _rgb = [[None]*3, [None]*3], 0
